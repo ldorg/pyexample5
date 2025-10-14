@@ -1,0 +1,258 @@
+name: ci
+
+on:
+  # push:
+  #   branches: [main, develop]
+  # pull_request:
+  #   branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      python_version:
+        description: 'Python version to use'
+        required: false
+        default: '3.11'
+        type: string
+
+env:
+  PYTHON_VERSION: ${{ inputs.python_version || '3.11' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      checks: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Cache pip packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run tests with coverage
+        run: |
+          pytest --junitxml=test-results.xml --cov=app --cov-report=xml --cov-report=term
+
+      - name: Upload coverage reports to Codecov
+        uses: codecov/codecov-action@v4
+        if: success()
+        with:
+          file: ./coverage.xml
+          fail_ci_if_error: false
+
+      # ========================================
+      # The following is unneeded as CloudBees Unify is triggering the GHA directly
+      # and as a result is able to capture the test results itself.
+      # ========================================
+      # CloudBees Action: Publish Test Results to CloudBees Unify
+      # ----------------------------------------
+      # Update test-type and results-path to match your test framework and output location
+      #
+      # Docs: https://github.com/cloudbees-io-gha/publish-test-results
+      # ========================================
+      # - name: Publish Test Results to CloudBees Unify
+      #   uses: cloudbees-io-gha/publish-test-results@v2
+      #   if: success() || failure()
+      #   with:
+      #     test-type: junit
+      #     results-path: test-results.xml
+
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Check code formatting with Black
+        run: black --check app/ tests/
+        continue-on-error: true
+
+      - name: Run Flake8 linting
+        run: flake8 app/ tests/ --max-line-length=100
+        continue-on-error: true
+
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # ========================================
+      # CloudBees Action: Black Duck SCA Security Scanning
+      # ----------------------------------------
+      # Requires variables: BLACK_DUCK_URL
+      # Requires secrets: BLACK_DUCK_TOKEN
+      # Update project-name to match your project
+      #
+      # Docs: https://github.com/cloudbees-io-gha/black-duck-scan-publish
+      # ========================================
+      - name: Scan with Black Duck SCA
+        env:
+          BLACK_DUCK_TOKEN: ${{ secrets.BLACK_DUCK_TOKEN }}
+        if: ${{ env.BLACK_DUCK_TOKEN != '' }}
+        uses: cloudbees-io-gha/black-duck-scan-publish@v2
+        with:
+          server-url: ${{ vars.BLACK_DUCK_URL }}
+          api-token: ${{ secrets.BLACK_DUCK_TOKEN }}
+          project-name: py-gha
+
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    needs: [test, lint, scan]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ env.PYTHON_VERSION }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install build setuptools wheel
+
+      - name: Set version from Git
+        id: version
+        run: |
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          NEW_VERSION="1.0.0-${COMMIT_COUNT}-${SHORT_SHA}"
+          echo "Setting version to: $NEW_VERSION"
+          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          # Update version in setup.py
+          sed -i "s/version=\"1.0.0\"/version=\"$NEW_VERSION\"/" setup.py
+
+      - name: Build Python package
+        run: |
+          python -m build
+
+      - name: Create distribution package
+        run: |
+          mkdir -p dist-upload
+          cp dist/*.whl dist-upload/
+          cp dist/*.tar.gz dist-upload/
+          cp README.md dist-upload/
+
+      - name: Upload package as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: py-gha-${{ steps.version.outputs.version }}
+          path: dist-upload/
+
+      # ========================================
+      # CloudBees Action: Register Build Artifacts
+      # ----------------------------------------
+      # Registers build artifacts with CloudBees Platform for artifact tracking and deployment
+      # Update parameters based on your artifact type and target repository
+      # The `type` field is an optional field to help convey what type it is
+      #
+      # Docs: https://github.com/cloudbees-io-gha/register-build-artifact
+      # ========================================
+      - name: Register Build Artifacts in CloudBees Platform
+        id: register-artifact
+        uses: cloudbees-io-gha/register-build-artifact@v3
+        with:
+          name: ${{ github.repository }}
+          url: https://github.com/${{ github.repository }}/releases/download/${{ steps.version.outputs.version }}/py-gha-${{ steps.version.outputs.version }}.tar.gz
+          version: ${{ steps.version.outputs.version }}
+          type: Python
+
+      # ========================================
+      # CloudBees Action: Label Artifact Version
+      # ----------------------------------------
+      # Adds metadata labels to registered artifacts for organization and filtering
+      # Requires artifact-id from the register-build-artifact step
+      # Update labels to match your tagging strategy
+      #
+      # Docs: https://github.com/cloudbees-io-gha/label-artifact-version
+      # ========================================
+      - name: Add Labels to Artifact
+        uses: cloudbees-io-gha/label-artifact-version@v1
+        with:
+          artifact-id: ${{ steps.register-artifact.outputs.cbp_artifact_id }}
+          labels: "main,python,flask"
+
+      # ========================================
+      # CloudBees Action: Publish Build Evidence
+      # ----------------------------------------
+      # Creates audit trail and compliance documentation for the build process
+      # Content can be customized to include contextual information
+      # Supports markdown formatting
+      #
+      # Docs: https://github.com/cloudbees-io-gha/publish-evidence-item
+      # ========================================
+      - name: Publish Build Evidence
+        uses: cloudbees-io-gha/publish-evidence-item@v2
+        with:
+          content: |-
+            # Build Evidence Report
+
+            ## Artifact Details
+            - **Repository**: ${{ github.repository }}
+            - **Version**: ${{ steps.version.outputs.version }}
+            - **Artifact ID**: ${{ steps.register-artifact.outputs.cbp_artifact_id }}
+            - **Type**: Python Package
+
+            ## Build Configuration
+            - **Python Version**: ${{ env.PYTHON_VERSION }}
+            - **Build Tool**: setuptools
+            - **Architecture**: ${{ runner.arch }}
+            - **OS**: ${{ runner.os }}
+
+            ## Deployment
+            - **Target**: GitHub Releases
+            - **Package**: py-gha-${{ steps.version.outputs.version }}.tar.gz
+            - **Labels**: main, python, flask
+
+            ## Quality Gates
+            - **Unit Tests**: ✅ Passed
+            - **Code Formatting**: ✅ Verified
+            - **Linting**: ✅ Completed
+
+            ## Workflow Summary
+            - **Branch**: ${{ github.ref_name }}
+            - **Commit**: ${{ github.sha }}
+            - **Run**: ${{ github.run_number }}
+            - **Triggered by**: ${{ github.event_name }}

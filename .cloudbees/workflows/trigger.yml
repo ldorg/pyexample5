@@ -1,0 +1,22 @@
+apiVersion: automation.cloudbees.io/v1alpha1
+kind: workflow
+name: trigger-gha
+on:
+  push:
+    branches:
+      - "**"
+
+jobs:
+  trigger-github-actions:
+    steps:
+      - name: Run GitHub Actions CI workflow
+        uses: https://github.com/cloudbees-io/ghactions-run-workflow@v1
+        with:
+          token: ${{ secrets.GHA_TOKEN }}
+          org-name: ldorg
+          repo-name: py-gha
+          branch-name: main
+          workflow-name: ci
+          test-type: junit
+          test-result-location: test-results.xml
+          parameters: '{"python_version":"3.11"}'
