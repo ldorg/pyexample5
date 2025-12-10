@@ -20,6 +20,8 @@ on:
 
 jobs:
   test:
+    outputs:
+      CODE_COVERAGE: ${{ steps.unit-tests.outputs.CODE_COVERAGE }}
     steps:
       - uses: cloudbees-io/checkout@v1
         name: Get source code
