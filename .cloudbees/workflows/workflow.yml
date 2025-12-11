@@ -31,7 +31,7 @@ jobs:
         kind: test
         run: |
           pip install -r requirements-dev.txt
-          pytest --junitxml=test-results.xml --cov=app --cov-report=markdown --cov-report=term
+          pytest --junitxml=test-results.xml --cov=app --cov-report=markdown
           cat coverage.md > "$CLOUDBEES_OUTPUTS/CODE_COVERAGE"
 
       - uses: cloudbees-io/publish-test-results@v2
