@@ -47,3 +47,70 @@ jobs:
 
             ${{ steps.unit-tests.outputs.CODE_COVERAGE }}
           format: MARKDOWN
+
+  snyk:
+    needs:
+      - test
+    steps:
+      - uses: cloudbees-io/checkout@v1
+        name: Get source code
+      - name: Scan with Snyk SAST
+        id: snyk-sast
+        uses: https://github.com/cloudbees-io/snyk-sast-scan-code@v1
+        with:
+          orgname: ${{ vars.SNYK_ORG }}
+          token: ${{ secrets.SNYK_SECRET }}
+          language: "LANGUAGE_PYTHON"
+      - name: Scan with Snyk SCA
+        id: snyk-sca
+        uses: https://github.com/cloudbees-io/snyk-sca-scan-dependency@v1
+        with:
+          orgname: ${{ vars.SNYK_ORG }}
+          token: ${{ secrets.SNYK_SECRET }}
+          language: "LANGUAGE_PYTHON"
+
+      - name: Publish evidence
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |-
+            ## Snyk SAST results
+
+            Critical count: ${{steps.snyk-sast.outputs.critical-count}}
+            Very high count: ${{steps.snyk-sast.outputs.very-high-count}}
+            High count: ${{steps.snyk-sast.outputs.high-count}}
+            Medium count: ${{steps.snyk-sast.outputs.medium-count}}
+            Low count: ${{steps.snyk-sast.outputs.low-count}}
+
+
+            ## Snyk SCA results
+
+            Critical count: ${{steps.snyk-sca.outputs.critical-count}}
+            Very high count: ${{steps.snyk-sca.outputs.very-high-count}}
+            High count: ${{steps.snyk-sca.outputs.high-count}}
+            Medium count: ${{steps.snyk-sca.outputs.medium-count}}
+            Low count: ${{steps.snyk-sca.outputs.low-count}}
+
+  sonarqube:
+    needs:
+      - test
+    steps:
+      - uses: cloudbees-io/checkout@v1
+        name: Get source code
+      - name: Scan with SonarQube
+        id: sonar-scan
+        uses: cloudbees-io/sonarqube-plugin@v1
+        with:
+          server-url: ${{ vars.SONAR_URL }}
+          token: ${{ secrets.SONAR_TOKEN }}
+
+      - name: Publish evidence
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |-
+            ## Sonar scan results
+
+            Critical count: ${{steps.sonar-scan.outputs.critical-count}}
+            Very high count: ${{steps.sonar-scan.outputs.very-high-count}}
+            High count: ${{steps.sonar-scan.outputs.high-count}}
+            Medium count: ${{steps.sonar-scan.outputs.medium-count}}
+            Low count: ${{steps.sonar-scan.outputs.low-count}}
