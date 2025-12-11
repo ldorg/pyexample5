@@ -127,6 +127,10 @@ jobs:
           poetry build
 
   build-image:
+    permissions:
+      scm-token-own: read
+      scm-token-org: read
+      id-token: write
     needs:
       - package
     steps:
@@ -136,14 +140,22 @@ jobs:
         uses: cloudbees-io/configure-aws-credentials@v1
         id: aws-login
         with:
-          aws-region: us-east-1
+          aws-region: ${{ vars.AWS_REGION }}
           role-duration-seconds: "1200"
-          role-to-assume: arn:aws:iam::268150017804:role/demo-image-builder
+          role-to-assume: ${{ vars.IMAGE_BUILDER_AWS_ROLE_ARN }}
       - uses: cloudbees-io/kaniko@v1
         name: Build container image
         id: build-image
         kind: build
         with:
-          destination: 268150017804.dkr.ecr.us-east-1.amazonaws.com/ldorg/pyexample:${{ cloudbees.scm.sha }}
+          destination: ${{ vars.ECR_REGISTRY }}/ldorg/pyexample:${{ cloudbees.scm.sha }}
           tar-path: container-image.tar
           build-args: BUILDKIT_CONTEXT_KEEP_GIT_DIR=1,BUILDKIT_INLINE_CACHE=1
+          artifact-name: pyexample
+      - name: Publish evidence
+        uses: cloudbees-io/publish-evidence-item@v1
+        with:
+          content: |-
+            ## Built and pushed image to ECR
+
+            Published ${{ vars.ECR_REGISTRY }}/ldorg/pyexample:${{ cloudbees.scm.sha }}
