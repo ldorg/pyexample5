@@ -38,6 +38,9 @@ jobs:
             ${{ steps.unit-tests.outputs.CODE_COVERAGE }}
           format: MARKDOWN
 
+  # These Snyk and SonarQube sections could also just run as part of the implicit scans
+  # that occur automatically. But I'm including them here as a reference for how this
+  # can be done.
   snyk:
     needs:
       - test
