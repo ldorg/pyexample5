@@ -6,7 +6,6 @@ on:
     branches:
       - "**"
   workflow_dispatch:
-
 jobs:
   test:
     outputs:
@@ -23,12 +22,10 @@ jobs:
           poetry install --with dev
           poetry run pytest --junitxml=test-results.xml --cov=app --cov-report=markdown --cov-report=term
           cat coverage.md > "$CLOUDBEES_OUTPUTS/CODE_COVERAGE"
-
       - uses: cloudbees-io/publish-test-results@v2
         with:
           test-type: JUNIT
           results-path: ${{ cloudbees.workspace }}/test-results.xml
-
       - name: Publish evidence
         uses: cloudbees-io/publish-evidence-item@v1
         with:
@@ -37,10 +34,6 @@ jobs:
 
             ${{ steps.unit-tests.outputs.CODE_COVERAGE }}
           format: MARKDOWN
-
-  # These Snyk and SonarQube sections could also just run as part of the implicit scans
-  # that occur automatically. But I'm including them here as a reference for how this
-  # can be done.
   snyk:
     needs:
       - test
@@ -53,15 +46,14 @@ jobs:
         with:
           orgname: ${{ vars.SNYK_ORG }}
           token: ${{ secrets.SNYK_SECRET }}
-          language: "LANGUAGE_PYTHON"
+          language: LANGUAGE_PYTHON
       - name: Scan with Snyk SCA
         id: snyk-sca
         uses: https://github.com/cloudbees-io/snyk-sca-scan-dependency@v1
         with:
           orgname: ${{ vars.SNYK_ORG }}
           token: ${{ secrets.SNYK_SECRET }}
-          language: "LANGUAGE_PYTHON"
-
+          language: LANGUAGE_PYTHON
       - name: Publish evidence
         uses: cloudbees-io/publish-evidence-item@v1
         with:
@@ -75,38 +67,9 @@ jobs:
             | High | ${{steps.snyk-sast.outputs.high-count}} |
             | Medium | ${{steps.snyk-sast.outputs.medium-count}} |
             | Low | ${{steps.snyk-sast.outputs.low-count}} |
-
-  sonarqube:
-    needs:
-      - test
-    steps:
-      - uses: cloudbees-io/checkout@v1
-        name: Get source code
-      - name: Scan with SonarQube
-        id: sonar-scan
-        uses: cloudbees-io/sonarqube-plugin@v1
-        with:
-          url: ${{ vars.SONAR_URL }}
-          token: ${{ secrets.SONAR_TOKEN }}
-
-      - name: Publish evidence
-        uses: cloudbees-io/publish-evidence-item@v1
-        with:
-          content: |-
-            ## Sonar scan results
-
-            | Severity | Count |
-            | --- | --- |
-            | Critical | ${{steps.sonar-scan.outputs.critical-count}} |
-            | Very High | ${{steps.sonar-scan.outputs.very-high-count}} |
-            | High | ${{steps.sonar-scan.outputs.high-count}} |
-            | Medium | ${{steps.sonar-scan.outputs.medium-count}} |
-            | Low | ${{steps.sonar-scan.outputs.low-count}} |
-
   package:
     needs:
       - snyk
-      - sonarqube
     steps:
       - uses: cloudbees-io/checkout@v1
         name: Get source code
@@ -117,7 +80,6 @@ jobs:
           pip install poetry
           poetry install
           poetry build
-
   build-image:
     permissions:
       scm-token-own: read
